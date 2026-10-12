@@ -347,7 +347,8 @@ function normalize(){
 
 /* ---------- calculations ---------- */
 function monthTx(ym){return S.tx.filter(t=>ymOf(t.date)===ym)}
-function monthSum(ym,type){return monthTx(ym).filter(t=>t.type===type).reduce((a,t)=>a+t.amount,0)}
+const counts=(t)=>!t.excl;
+function monthSum(ym,type){return monthTx(ym).filter(t=>t.type===type&&counts(t)).reduce((a,t)=>a+t.amount,0)}
 function balances(){
   const b={}; S.accounts.forEach(a=>b[a.id]=Number(a.opening)||0);
   const from=S.openingDate;
@@ -382,7 +383,7 @@ function suggestions(q,type){
     e.count++; if(t.date>=e.date){e.date=t.date;e.last=t.amount;e.category=t.category;e.item=k} map.set(kl,e); });
   return [...map.values()].sort((a,b)=>(b.item.toLowerCase().startsWith(q)-a.item.toLowerCase().startsWith(q))||b.count-a.count).slice(0,4);
 }
-function catBreakdown(ym){const m={};monthTx(ym).forEach(t=>{if(t.type==="expense")m[t.category]=(m[t.category]||0)+t.amount});return Object.entries(m).sort((a,b)=>b[1]-a[1])}
+function catBreakdown(ym){const m={};monthTx(ym).forEach(t=>{if(t.type==="expense"&&counts(t))m[t.category]=(m[t.category]||0)+t.amount});return Object.entries(m).sort((a,b)=>b[1]-a[1])}
 
 /* ---------- rendering ---------- */
 function render(){
@@ -464,7 +465,7 @@ function txRow(t){
   let sub=[isTr?`${acctName(t.account)} → ${acctName(t.to)}`:(t.category||"")];
   if(!isTr&&t.account) sub.push(acctName(t.account).replace(" Bank",""));
   if(t.bdt) sub.push(`৳${Number(t.bdt).toLocaleString("en-US")}`);
-  const pill=t.refund==="pending"?' <span class="pill warn">Refund due</span>':t.refund==="received"?' <span class="pill good">Refunded</span>':"";
+  const pill=t.refund==="pending"?' <span class="pill warn">Refund due</span>':t.refund==="received"?' <span class="pill good">Refunded</span>':t.excl?' <span class="pill">Not in Spent</span>':"";
   return `<button class="row" data-act="edit" data-id="${t.id}">${icoBox(cat)}<span class="grow"><div class="t">${esc(t.item)}</div><div class="s">${esc(sub.join(" · "))}${pill}</div></span><span class="v num ${isInc?"pos":""}">${isInc?"+":isTr?"":"−"}₩${t.amount.toLocaleString("en-US")}</span></button>`;
 }
 function renderActivity(){
@@ -477,13 +478,13 @@ function renderActivity(){
   let h=`<div class="nav"><div><div class="sub">${q?"Searching all months":"Every entry"}</div><h1>Activity</h1></div>${q||UI.filter==="refund"?"":monthPicker()}</div>
   <label class="search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search items, e.g. dental" value="${esc(UI.q)}" autocomplete="off"></label>
   <div class="seg" role="group" aria-label="Filter">${[["all","All"],["expense","Spent"],["income","Income"],["refund","Refunds"]].map(([k,l])=>`<button data-act="filter" data-k="${k}" aria-pressed="${UI.filter===k}">${l}</button>`).join("")}</div>`;
-  if(q){const tot=list.reduce((a,t)=>a+(t.type==="income"?0:t.amount),0);h+=`<div class="foot" style="margin-top:12px">${list.length} match${list.length===1?"":"es"} · ${won(tot)} spent</div>`}
+  if(q){const tot=list.reduce((a,t)=>a+(t.type==="expense"&&counts(t)?t.amount:0),0);h+=`<div class="foot" style="margin-top:12px">${list.length} match${list.length===1?"":"es"} · ${won(tot)} spent</div>`}
   if(!list.length){h+=`<div class="empty"><b>${q?"Nothing found":"No entries yet"}</b>${q?"Try another word.":"Tap + to add what you spend or receive."}</div>`}
   else{
     let cur=null, buf="";
     const flush=()=>{if(cur){h+=buf+"</div>"}};
     list.forEach(t=>{
-      if(t.date!==cur){flush();cur=t.date;const dayExp=list.filter(x=>x.date===cur&&x.type==="expense").reduce((a,x)=>a+x.amount,0);buf=`<div class="dayh"><span>${dayLabel(cur)}${q?` ${cur.slice(0,4)}`:""}</span><span class="num">${dayExp?won(dayExp):""}</span></div><div class="list">`}
+      if(t.date!==cur){flush();cur=t.date;const dayExp=list.filter(x=>x.date===cur&&x.type==="expense"&&counts(x)).reduce((a,x)=>a+x.amount,0);buf=`<div class="dayh"><span>${dayLabel(cur)}${q?` ${cur.slice(0,4)}`:""}</span><span class="num">${dayExp?won(dayExp):""}</span></div><div class="list">`}
       buf+=txRow(t);
     });
     flush();
@@ -534,7 +535,7 @@ function renderInsights(){
     h+=`</div>`;
   }
   // top items
-  const items=monthTx(ym).filter(t=>t.type==="expense").sort((a,b)=>b.amount-a.amount).slice(0,5);
+  const items=monthTx(ym).filter(t=>t.type==="expense"&&counts(t)).sort((a,b)=>b.amount-a.amount).slice(0,5);
   if(items.length){h+=`<div class="cap">Biggest expenses</div><div class="list">${items.map(txRow).join("")}</div>`}
   $("#s-insights").innerHTML=h;
 }
@@ -571,7 +572,7 @@ function renderMoney(){
   h+=`<div class="cap">Backup</div><div class="list plain">
     <button class="row" data-act="export"><span class="grow t" style="color:var(--accent)">Download backup</span></button>
     <button class="row" data-act="exportcsv"><span class="grow t" style="color:var(--accent)">Download as spreadsheet (CSV)</span></button>
-    <button class="row" data-act="import"><span class="grow t" style="color:var(--accent)">Restore from backup…</span></button>
+    <button class="row" data-act="import"><span class="grow t" style="color:var(--accent)">Load history or restore a backup…</span></button>
   </div><div class="foot">Everything is saved on this phone. Download a backup now and then and keep it in Files or iCloud Drive. ${S.tx.filter(t=>t.hist).length} entries came from your CAU Costing sheet (Nov 2025 – Sep 2026).</div>`;
   $("#s-money").innerHTML=h;
 }
@@ -609,10 +610,11 @@ function entrySheet(t,preset){
     ${isTr?`<div class="cap">To</div>${acctChips(t.to||S.accounts.find(a=>a.id!==t.account)?.id,"to")}`:
       `<div class="cap">Category</div>${catGrid(isInc?INC_CATS:EXP_CATS,t.category)}`}
     ${t.type==="expense"?`<div class="list" style="margin-top:18px">
+      <div class="field"><label for="f-count">Count in Spent</label><span class="grow"></span><span class="switch"><input type="checkbox" id="f-count" ${t.excl?"":"checked"}><i></i></span></div>
       <div class="field"><label for="f-refund">Awaiting refund</label><span class="grow"></span><span class="switch"><input type="checkbox" id="f-refund" ${t.refund==="pending"?"checked":""}><i></i></span></div>
       <div class="field" id="bdtRow" ${t.category==="Sent home"?"":"hidden"}><label for="f-bdt">Taka received</label><input id="f-bdt" inputmode="numeric" placeholder="৳ optional" value="${t.bdt||""}"></div>
       <div class="field" id="feeRow" ${t.category==="Sent home"?"":"hidden"}><label for="f-fee">Transfer fee</label><input id="f-fee" inputmode="numeric" placeholder="₩ optional" value="${t.fee||""}"></div>
-    </div><div class="foot">Turn on “Awaiting refund” for things like conference fees you'll get back.</div>`:""}
+    </div><div class="foot">Turn off “Count in Spent” for money that shouldn't add to monthly spending, like rent or the lab fund. Turn on “Awaiting refund” for things like conference fees you'll get back.</div>`:""}
     <div class="list" style="margin-top:16px"><div class="field left"><input id="f-note" placeholder="Note (optional)" value="${esc(t.note||"")}"></div></div>
     ${editing?`<button class="btn danger" type="button" data-act="del" data-id="${t.id}">Delete entry</button>`:""}
     ${t.hist?`<div class="foot" style="text-align:center">Imported from your sheet. It counts in charts but not in account balances.</div>`:""}`;
@@ -622,6 +624,7 @@ function entrySheet(t,preset){
     const it=$("#f-item"); if(it) t.item=it.value.trim();
     t.account=grpVal("acct"); if(t.type==="transfer") t.to=grpVal("to"); else t.category=grpVal("cat");
     const n=$("#f-note"); if(n) t.note=n.value.trim();
+    const ct=$("#f-count"); if(ct) t.excl=ct.checked?undefined:true;
     const r=$("#f-refund"); if(r) t.refund=r.checked?"pending":(t.refund==="received"?"received":undefined);
     const b=$("#f-bdt"); if(b) t.bdt=parseAmt(b.value)||undefined;
     const f=$("#f-fee"); if(f) t.fee=parseAmt(f.value)||undefined;
@@ -798,6 +801,17 @@ function doCsv(){const rows=[["Date","Type","Item","Category","Account","Amount"
   offerFile(`cau-costing-${todayStr()}.csv`,rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n"),"text/csv")}
 $("#importFile").addEventListener("change",async(e)=>{const f=e.target.files[0];e.target.value="";if(!f)return;
   try{const j=JSON.parse(await f.text());if(!Array.isArray(j.tx))throw 0;
+    if(j.kind==="history"){
+      const mine=S.tx.filter(t=>!t.hist).length;
+      openSheet("Load sheet history",`<div class="empty"><b>Update your CAU Costing history?</b>${j.tx.length} entries from Nov 2025 – Sep 2026 replace the old imported history.${mine?` Your own ${mine} entr${mine===1?"y":"ies"}, balances, bills, budgets and goals stay as they are.`:""}</div>`,()=>{
+        const ids=new Set(j.loans.map(l=>l.id));
+        S.tx=S.tx.filter(t=>!t.hist).concat(j.tx);
+        S.loans=S.loans.filter(l=>!ids.has(l.id)).concat(j.loans);
+        if(!S.bills.length) S.bills=j.bills||[];
+        if(!Object.keys(S.budgets).length) S.budgets=j.budgets||{};
+        normalize();save(S.tx.map(t=>ymOf(t.date)));if(Cloud.db)pushAllCloud();render();toast("History updated")},"Update");
+      return;
+    }
     openSheet("Restore backup",`<div class="empty"><b>Replace everything with this backup?</b>${j.tx.length} entries from ${esc(f.name)}. What's in the app now will be replaced.</div>`,()=>{S=j;normalize();save();if(Cloud.db)pushAllCloud();render();toast("Backup restored")},"Restore");
   }catch(err){toast("That file isn't a backup from this app")}});
 
